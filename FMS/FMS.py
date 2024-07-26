@@ -7,22 +7,23 @@ import random
 import socket
 
 
-# Load challenge from a text file
+# This will load challenges object from the FMS File and split them to split between IP address and Challenge
 def load_challenge(filename='challenges.txt'):
     with open(filename, 'r') as file:
         return file.read().split(":")
 
 
 # Save keys and session ID to a text file
-def save_keys_and_session_id(filename, private_key, public_key, session_id, OBU_public_key):
+def save_keys_and_session_id(filename, private_key, public_key, session_id, OBU_public_key, shared_key):
     with open(filename, 'w') as file:
         file.write(f"Private Key:\n{private_key}\n")
         file.write(f"Public Key:\n{public_key}\n")
         file.write(f"Session ID:\n{session_id}\n")
         file.write(f"OBU Public Key:\n{OBU_public_key}\n")
+        file.write(f"Shared Key:\n{shared_key}\n")
 
 
-# Hash function
+# Hash function to convert the data into a SHA-256 hash
 def hash_function(data):
     return hashlib.sha256(data.encode()).hexdigest()
 
@@ -99,18 +100,22 @@ def handle_client(connection):
             print(f"Received OBU Public Key:\n{public_key_obu_bytes}")
             print(f"Received Session Key: {session_key}")
 
+            # Compute shared key
+            shared_key = compute_shared_key(fms_private_key, obu_public_key)
+            print(f"Computed Shared Key: {shared_key.hex()}")
 
             # Save keys and session ID
             save_keys_and_session_id('fms_keys.txt', fms_private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption()
-            ).decode(), fms_public_key_data.decode(), session_key, public_key_obu_bytes)
+            ).decode(), fms_public_key_data.decode(), session_key, public_key_obu_bytes, shared_key.hex())
         else:
             connection.sendall("FAILED".encode())
             print("Verification Failed")
     finally:
         connection.close()
+
 
 
 def main():
