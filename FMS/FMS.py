@@ -1,121 +1,118 @@
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.backends import default_backend
-import hashlib
-import random
+import sqlite3
 import socket
+import json
+import os
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 
-# This will load challenges object from the FMS File and split them to split between IP address and Challenge
-def load_challenge(filename='challenges.txt'):
-    with open(filename, 'r') as file:
-        return file.read().split(":")
+# Fetch FMS keys from the database
+def fetch_fms_keys():
+    conn = sqlite3.connect('fms_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT public_key, private_key FROM fms_keys LIMIT 1")
+    result = cursor.fetchone()
+    conn.close()
+    public_key_pem, private_key_pem = result
+    public_key = serialization.load_pem_public_key(public_key_pem.encode())
+    private_key = serialization.load_pem_private_key(private_key_pem.encode(), password=None)
+    return public_key, private_key
 
 
-# Save keys and session ID to a text file
-def save_keys_and_session_id(filename, private_key, public_key, session_id, OBU_public_key, shared_key):
-    with open(filename, 'w') as file:
-        file.write(f"Private Key:\n{private_key}\n")
-        file.write(f"Public Key:\n{public_key}\n")
-        file.write(f"Session ID:\n{session_id}\n")
-        file.write(f"OBU Public Key:\n{OBU_public_key}\n")
-        file.write(f"Shared Key:\n{shared_key}\n")
+# Fetch OBU challenge from the database
+def fetch_obu_challenge(sid):
+    conn = sqlite3.connect('fms_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT challenge FROM obu_challenges WHERE sid=?", (sid,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return result[0]
+    return None
 
 
-# Hash function to convert the data into a SHA-256 hash
-def hash_function(data):
-    return hashlib.sha256(data.encode()).hexdigest()
+# Fetch or save OBU key information in the database
+def save_obu_keys(sid, public_key_pem, shared_secret, session_id):
+    conn = sqlite3.connect('fms_database.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO obu_keys (sid, public_key, shared_secret, session_id) VALUES (?, ?, ?, ?)",
+                   (sid, public_key_pem, shared_secret, session_id))
+    conn.commit()
+    conn.close()
 
 
-# Generate ECDSA keys
-def generate_ecdsa_keys():
-    private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
-    public_key = private_key.public_key()
-    return private_key, public_key
-
-
-# Compute shared key
-def compute_shared_key(private_key, public_key):
-    shared_key = private_key.exchange(ec.ECDH(), public_key)
-    derived_key = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b'handshake data',
-        backend=default_backend()
-    ).derive(shared_key)
-    return derived_key
-
-
-# Generate session key
-def generate_session_key():
-    return hashlib.sha256(str(random.getrandbits(256)).encode()).hexdigest()
-
-
-# Create server socket
-def create_server():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('localhost', 65432)
-    sock.bind(server_address)
-    sock.listen(1)
-    print("Server listening on", server_address)
-    return sock
-
-
-# Handle client connection
-def handle_client(connection):
+# Handle OBU requests
+def handle_obu_request(connection):
     try:
-        # Step 1: Send nonce
-        nonce = random.randint(1000, 19999)
-        print(f"Sending Nonce: {nonce}")
-        connection.sendall(str(nonce).encode())
+        data = connection.recv(4096)
+        request = json.loads(data.decode())
+        print("Received request:", request)
 
-        # Step 2: Receive proof
-        proof = connection.recv(256).decode()
-        print(f"Received Proof: {proof}")
+        if request['type'] == 'request_nonce':
+            sid = request['sid']
+            challenge = fetch_obu_challenge(sid)
+            if not challenge:
+                raise ValueError(f"No challenge found for SID: {sid}")
 
-        # Load challenge
-        challenge = load_challenge()
-        print(challenge[1])
-        # Verify proof
-        expected_proof = hash_function(f"{nonce}{challenge[1]}")
-        if proof == expected_proof:
-            connection.sendall("VERIFIED".encode())
-            print("Verification Successful")
+            nonce = os.urandom(16).hex()
+            response = {'nonce': nonce, 'sid': sid}
+            connection.sendall(json.dumps(response).encode())
 
-            # Step 4: Send FMS's ECDSA public key
-            fms_private_key, fms_public_key = generate_ecdsa_keys()
-            fms_public_key_data = fms_public_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
-            connection.sendall(fms_public_key_data)
-            print(f"Sent FMS Public Key:\n{fms_public_key_data.decode()}")
+            # Wait for proof from OBU
+            data = connection.recv(4096)
+            proof_response = json.loads(data.decode())
+            received_proof = proof_response['proof']
 
-            # Step 5: Receive OBU's public key and session key
-            obu_response = connection.recv(4096).decode()
-            public_key_obu_bytes, session_key = obu_response.split(',')
-            obu_public_key = serialization.load_pem_public_key(public_key_obu_bytes.encode(), backend=default_backend())
-            print(f"Received OBU Public Key:\n{public_key_obu_bytes}")
-            print(f"Received Session Key: {session_key}")
+            # Calculate expected proof
+            expected_proof = hashes.Hash(hashes.SHA256())
+            expected_proof.update(nonce.encode())
+            expected_proof.update(challenge.encode())
+            calculated_proof = expected_proof.finalize().hex()
 
-            # Compute shared key
-            shared_key = compute_shared_key(fms_private_key, obu_public_key)
-            print(f"Computed Shared Key: {shared_key.hex()}")
+            if received_proof == calculated_proof:
+                print("Authentication successful")
+                # Send FMS public key
+                fms_public_key, _ = fetch_fms_keys()
+                fms_public_key_pem = fms_public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode()
+                connection.sendall(json.dumps({'status': 'success', 'fms_public_key': fms_public_key_pem}).encode())
 
-            # Save keys and session ID
-            save_keys_and_session_id('fms_keys.txt', fms_private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            ).decode(), fms_public_key_data.decode(), session_key, public_key_obu_bytes, shared_key.hex())
-        else:
-            connection.sendall("FAILED".encode())
-            print("Verification Failed")
+                # Receive OBU public key and calculate shared secret
+                data = connection.recv(4096)
+                obu_public_key_response = json.loads(data.decode())
+                obu_public_key_pem = obu_public_key_response['obu_public_key']
+                obu_public_key = serialization.load_pem_public_key(obu_public_key_pem.encode())
+
+                fms_private_key = fetch_fms_keys()[1]
+                shared_secret = fms_private_key.exchange(ec.ECDH(), obu_public_key).hex()
+                session_id = os.urandom(16).hex()
+
+                # Save OBU keys and shared secret
+                save_obu_keys(sid, obu_public_key_pem, shared_secret, session_id)
+
+                # Send shared secret and session ID to OBU
+                connection.sendall(json.dumps({'shared_secret': shared_secret, 'session_id': session_id}).encode())
+                print("Authentication and Key Establishment Phase Successful")
+            else:
+                print("Authentication failed")
+                connection.sendall(json.dumps({'status': 'failed'}).encode())
+
+    except Exception as e:
+        print("An error occurred:", e)
     finally:
         connection.close()
 
+
+# Create server to listen for connections
+def create_server():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_address = ('0.0.0.0', 65331)
+    sock.bind(server_address)
+    sock.listen(1)
+    print("FMS server listening on", server_address)
+    return sock
 
 
 def main():
@@ -123,7 +120,7 @@ def main():
     while True:
         connection, client_address = server_sock.accept()
         try:
-            handle_client(connection)
+            handle_obu_request(connection)
         except Exception as e:
             print(f"An error occurred: {e}")
         finally:
