@@ -16,11 +16,9 @@ def load_obu_data(filename='obu_data.txt'):
 
 
 # Save OBU data to the file
-def save_obu_data(sid, challenge, obu_private_key, obu_public_key, fms_public_key, shared_secret, session_id,
-                  filename='obu_data.txt'):
+def save_obu_data(obu_private_key, obu_public_key, fms_public_key, shared_secret, session_id,
+                  filename='obu_keys.txt'):
     with open(filename, 'w') as file:
-        file.write(f"SID:\n{sid}\n")
-        file.write(f"Challenge:\n{challenge}\n")
         file.write(f"OBU Private Key:\n{obu_private_key}\n")
         file.write(f"OBU Public Key:\n{obu_public_key}\n")
         file.write(f"FMS Public Key:\n{fms_public_key}\n")
@@ -35,7 +33,7 @@ def establish_keys_with_fms():
 
     # Create socket and connect to FMS
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('localhost', 65331)
+    server_address = ('localhost', 65339)
     sock.connect(server_address)
     try:
         sock.sendall(request)
@@ -88,7 +86,7 @@ def establish_keys_with_fms():
         print("Received shared secret and session ID")
 
         # Save all data to OBU data file
-        save_obu_data(sid, challenge, obu_private_key_pem, obu_public_key_pem, fms_public_key_pem, shared_secret,
+        save_obu_data(obu_private_key_pem, obu_public_key_pem, fms_public_key_pem, shared_secret,
                       session_id)
         print("Authentication and Key Establishment Phase Successful")
 

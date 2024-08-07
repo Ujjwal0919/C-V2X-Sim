@@ -38,8 +38,8 @@ def start_rsu_server(rsu_address, fms_address):
 
 
 def main():
-    rsu_address = ('localhost', 65433)
-    fms_address = ('localhost', 65431)
+    rsu_address = ('localhost', 65438)
+    fms_address = ('localhost', 65439)
     start_rsu_server(rsu_address, fms_address)
 
 

@@ -108,7 +108,7 @@ def handle_obu_request(connection):
 # Create server to listen for connections
 def create_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('0.0.0.0', 65331)
+    server_address = ('0.0.0.0', 65339)
     sock.bind(server_address)
     sock.listen(1)
     print("FMS server listening on", server_address)
