@@ -10,26 +10,33 @@ import re
 
 # Load OBU keys, session ID, and shared secret
 def load_obu_keys(filename='obu_keys.txt'):
-        with open(filename, 'r') as file:
-            content = file.read()
-            # Extract private key
-            private_key = re.search(r'-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----', content, re.DOTALL)
-            private_key = private_key.group().strip() if private_key else None
-            # Extract public key
-            public_key = re.search(r'-----BEGIN PUBLIC KEY-----(.+?)-----END PUBLIC KEY-----', content, re.DOTALL)
-            public_key = public_key.group().strip() if public_key else None
-            # Extract session ID
-            session_id = re.search(r'Session ID:\s*(\S+)', content)
-            session_id = session_id.group(1).strip() if session_id else None
-            # Extract OBU public key
-            obu_public_key = re.search(r'OBU Public Key:\s*(-----BEGIN PUBLIC KEY-----(.+?)-----END PUBLIC KEY-----)',
-                                       content, re.DOTALL)
-            obu_public_key = obu_public_key.group(1).strip() if obu_public_key else None
-            # Extract shared key
-            shared_key = re.search(r'Shared Key:\s*(\S+)', content)
-            shared_key = shared_key.group(1).strip() if shared_key else None
+    with open(filename, 'r') as file:
+        text = file.read()
 
-        return private_key, public_key, session_id, obu_public_key, shared_key.encode()
+    # Extract OBU Private Key
+    obu_private_key_match = re.search(
+        r'OBU Private Key:\n(-----BEGIN EC PRIVATE KEY-----[\s\S]+?-----END EC PRIVATE KEY-----)', text)
+    obu_private_key = obu_private_key_match.group(1).strip() if obu_private_key_match else None
+
+    # Extract OBU Public Key
+    obu_public_key_match = re.search(r'OBU Public Key:\n(-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----)',
+                                     text)
+    obu_public_key = obu_public_key_match.group(1).strip() if obu_public_key_match else None
+
+    # Extract FMS Public Key
+    fms_public_key_match = re.search(r'FMS Public Key:\n(-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----)',
+                                     text)
+    fms_public_key = fms_public_key_match.group(1).strip() if fms_public_key_match else None
+
+    # Extract Shared Secret
+    shared_secret_match = re.search(r'Shared Secret:\n([a-fA-F0-9]+)', text)
+    shared_secret = shared_secret_match.group(1).strip() if shared_secret_match else None
+
+    # Extract Session ID
+    session_id_match = re.search(r'Session ID:\n([a-fA-F0-9]+)', text)
+    session_id = session_id_match.group(1).strip() if session_id_match else None
+
+    return obu_private_key,fms_public_key,session_id,obu_public_key,shared_secret.encode()
 
 
 # Hash function
@@ -57,9 +64,7 @@ def sign_message(key, message):
 
 # Create data packet
 def create_data_packet(message, session_id, signature):
-    message_hash = hash_message(message)
     data_packet = {
-        'message_hash': message_hash,
         'session_id': session_id,
         'message': message,
         'signature': signature.hex()
@@ -91,7 +96,7 @@ def send_message_to_fms(message, session_id, shared_secret):
     print(f"Sending data packet: {encrypted_data_packet.hex()}")
     # Send data to FMS
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('localhost', 65432)
+    server_address = ('localhost', 65439)
     sock.connect(server_address)
 
     try:

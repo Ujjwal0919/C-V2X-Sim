@@ -1,34 +1,31 @@
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization
 import socket
 import json
 import hashlib
+import sqlite3
 import re
 
 
 # Load FMS keys, session ID, and shared secret
-def load_fms_keys(filename='fms_keys.txt'):
-    with open(filename, 'r') as file:
-        content = file.read()
-        # Extract private key
-        private_key = re.search(r'-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----', content, re.DOTALL)
-        private_key = private_key.group().strip() if private_key else None
-        # Extract public key
-        public_key = re.search(r'-----BEGIN PUBLIC KEY-----(.+?)-----END PUBLIC KEY-----', content, re.DOTALL)
-        public_key = public_key.group().strip() if public_key else None
-        # Extract session ID
-        session_id = re.search(r'Session ID:\s*(\S+)', content)
-        session_id = session_id.group(1).strip() if session_id else None
-        # Extract OBU public key
-        obu_public_key = re.search(r'OBU Public Key:\s*(-----BEGIN PUBLIC KEY-----(.+?)-----END PUBLIC KEY-----)',
-                                   content, re.DOTALL)
-        obu_public_key = obu_public_key.group(1).strip() if obu_public_key else None
-        # Extract shared key
-        shared_key = re.search(r'Shared Key:\s*(\S+)', content)
-        shared_key = shared_key.group(1).strip() if shared_key else None
+def load_fms_keys():
+    conn = sqlite3.connect('fms_database.db')
+    cursor = conn.cursor()
+    conn = sqlite3.connect('fms_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT public_key, private_key FROM fms_keys LIMIT 1")
+    result = cursor.fetchone()
+    fms_public_key, fms_private_key = result
+    cursor = conn.cursor()
+    cursor.execute("SELECT SID, public_key, shared_secret, session_id FROM obu_keys")
+    result = cursor.fetchone()
+    SID, obu_public_key, obu_shared_secret, obu_session_id = result
+    return fms_private_key,fms_public_key, obu_session_id,obu_public_key, obu_shared_secret.encode()
 
-    return private_key, public_key, session_id, obu_public_key, shared_key.encode()
+
+
 
 
 # Hash function
@@ -61,7 +58,7 @@ def verify_signature(key, message, signature):
 # Receive and process message from OBU
 def receive_message_from_obu(shared_secret):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('localhost', 65432)
+    server_address = ('localhost', 65439)
     sock.bind(server_address)
     sock.listen(1)
 
@@ -87,13 +84,7 @@ def receive_message_from_obu(shared_secret):
         # Verify the signature
         if verify_signature(shared_secret, data_packet['message'], data_packet['signature']):
             print("Signature verified successfully.")
-
-            # Verify the message hash
-            if hash_message(data_packet['message']) == data_packet['message_hash']:
-                print("Message hash verified successfully.")
-                print("Received message:", data_packet['message'])
-            else:
-                print("Message hash verification failed.")
+            print("Received Message: " + data_packet['message'])
         else:
             print("Signature verification failed.")
 
