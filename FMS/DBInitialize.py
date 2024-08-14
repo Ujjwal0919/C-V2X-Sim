@@ -3,6 +3,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 
+
 def initialize_database():
     conn = sqlite3.connect('fms_database.db')
     cursor = conn.cursor()
@@ -25,6 +26,7 @@ def initialize_database():
     conn.commit()
     conn.close()
 
+
 def generate_and_store_fms_keys():
     private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
     public_key = private_key.public_key()
@@ -46,6 +48,7 @@ def generate_and_store_fms_keys():
                    (private_key_pem, public_key_pem))
     conn.commit()
     conn.close()
+
 
 if __name__ == "__main__":
     initialize_database()

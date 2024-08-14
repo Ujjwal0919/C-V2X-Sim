@@ -4,6 +4,9 @@ import json
 import os
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+import hashlib
+from cryptography.fernet import Fernet
+import base64
 
 
 # Fetch FMS keys from the database
@@ -19,15 +22,31 @@ def fetch_fms_keys():
     return public_key, private_key
 
 
+def encrypt_message(message, challenge):
+    challenge_hash = hashlib.sha256(challenge.encode()).digest()
+    encryption_key = base64.urlsafe_b64encode(challenge_hash[:32])
+    cipher_suite = Fernet(encryption_key)
+    encrypted_message = cipher_suite.encrypt(message.encode())
+    return encrypted_message.decode()
+
+
+def decrypt_message(message, challenge):
+    challenge_hash = hashlib.sha256(challenge.encode()).digest()
+    decryption_key = base64.urlsafe_b64encode(challenge_hash[:32])
+    cipher_suite = Fernet(decryption_key)
+    decrypted_message = cipher_suite.decrypt(message).decode()
+    return decrypted_message
+
+
 # Fetch OBU challenge from the database
 def fetch_obu_challenge(sid):
     conn = sqlite3.connect('fms_database.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT challenge FROM obu_challenges WHERE sid=?", (sid,))
+    cursor.execute("SELECT challenge, SID FROM obu_challenges WHERE sid=?", (sid,))
     result = cursor.fetchone()
     conn.close()
     if result:
-        return result[0]
+        return result[0], result[1]
     return None
 
 
@@ -47,47 +66,51 @@ def handle_obu_request(connection):
         data = connection.recv(4096)
         request = json.loads(data.decode())
         print("Received request type:", request['type'] + ' ' + request['sid'])
-
+        # Step 1: Receive Authentication Request
         if request['type'] == 'request_nonce':
             sid = request['sid']
-            challenge = fetch_obu_challenge(sid)
+            challenge, sid = fetch_obu_challenge(sid)
+            print("Determined challenge and SID:", challenge, sid)
             if not challenge:
-                raise ValueError(f"No challenge found for SID: {sid}")
-
+                raise ValueError(f":{sid} not found")
+        # Step 2: Generate and Send Challenge Request
             nonce = os.urandom(16).hex()
-            response = {'nonce': nonce, 'sid': sid}
-            connection.sendall(json.dumps(response).encode())
+            print("Generated Plaintext Nonce: ", nonce)
+            encrypted_nonce = encrypt_message(nonce, challenge)
+            print("Encrypted Nonce: ", encrypted_nonce)
+            challenge_request = {'nonce': encrypted_nonce, 'sid': sid}
+            connection.sendall(json.dumps(challenge_request).encode())
             print(f"Sending Nonce: {nonce}")
 
-            # Wait for proof from OBU
+        # Step 3: Receive and validate Challenge Response
             data = connection.recv(4096)
-            proof_response = json.loads(data.decode())
-            received_proof = proof_response['proof']
-            print(f"Got proof: {proof_response['proof']}")
+            challenge_response = json.loads(data.decode())
+            encrypted_proof = challenge_response['proof']
+            decrypted_proof = decrypt_message(encrypted_proof, challenge)
 
+            print(f"Got proof: {decrypted_proof}")
 
             # Calculate expected proof
-            expected_proof = hashes.Hash(hashes.SHA256())
-            expected_proof.update(nonce.encode())
-            expected_proof.update(challenge.encode())
-            calculated_proof = expected_proof.finalize().hex()
+            calculated_proof = hashlib.sha256((nonce + challenge).encode()).hexdigest()
+            print(f"Calculated proof: {calculated_proof}")
 
-            if received_proof == calculated_proof:
+            if decrypted_proof == calculated_proof:
                 print("Proof Matched and Authentication successful")
-                # Send FMS public key
+                # Step 4: Send FMS Public Key
                 fms_public_key, _ = fetch_fms_keys()
                 fms_public_key_pem = fms_public_key.public_bytes(
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo
                 ).decode()
-                connection.sendall(json.dumps({'status': 'success', 'fms_public_key': fms_public_key_pem}).encode())
+                fms_pub_enc = encrypt_message(fms_public_key_pem,challenge)
+                connection.sendall(json.dumps({'SID': sid ,'status': 'success', 'fms_public_key': fms_pub_enc}).encode())
                 print("FMS Public Key Sent")
 
-                # Receive OBU public key and calculate shared secret
+                # Step 5: Receive OBU Public Key
                 data = connection.recv(4096)
                 obu_public_key_response = json.loads(data.decode())
-                obu_public_key_pem = obu_public_key_response['obu_public_key']
-                obu_public_key = serialization.load_pem_public_key(obu_public_key_pem.encode())
+                obu_dec_key = decrypt_message(obu_public_key_response['obu_public_key'], challenge)
+                obu_public_key = serialization.load_pem_public_key(obu_dec_key.encode())
                 print("Received OBU Public Key")
 
                 fms_private_key = fetch_fms_keys()[1]
@@ -96,10 +119,12 @@ def handle_obu_request(connection):
                 print("Shared Secret & session_id Calculated")
 
                 # Save OBU keys and shared secret
-                save_obu_keys(sid, obu_public_key_pem, shared_secret, session_id)
+                save_obu_keys(sid, obu_dec_key, shared_secret, session_id)
+                shared_sec_enc = encrypt_message(shared_secret, challenge)
+                session_id_enc = encrypt_message(session_id, challenge)
 
-                # Send shared secret and session ID to OBU
-                connection.sendall(json.dumps({'shared_secret': shared_secret, 'session_id': session_id}).encode())
+                # Step 6: Send shared secret and session ID to OBU
+                connection.sendall(json.dumps({'shared_secret': shared_sec_enc, 'session_id': session_id_enc}).encode())
                 print("Authentication and Key Establishment Phase Successful")
             else:
                 print("Authentication failed")
@@ -114,7 +139,7 @@ def handle_obu_request(connection):
 # Create server to listen for connections
 def create_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('0.0.0.0', 65339)
+    server_address = ('0.0.0.0', 65335)
     sock.bind(server_address)
     sock.listen(1)
     print("FMS server listening on", server_address)

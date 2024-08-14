@@ -1,5 +1,6 @@
 import socket
 
+
 def relay_message(source_address, destination_address):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(source_address)
@@ -24,10 +25,12 @@ def relay_message(source_address, destination_address):
         finally:
             connection.close()
 
+
 def main():
     rsu_address = ('localhost', 65431)  # RSU listens on this address
     fms_address = ('localhost', 65432)  # FMS address where RSU forwards data
     relay_message(rsu_address, fms_address)
+
 
 if __name__ == "__main__":
     main()

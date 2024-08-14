@@ -2,45 +2,44 @@ import socket
 import threading
 
 
-def forward_message(client_socket, target_address, buffer_size=4096):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as forward_socket:
-            forward_socket.connect(target_address)
-            while True:
-                data = client_socket.recv(buffer_size)
-                if not data:
-                    break
-                forward_socket.sendall(data)
-                response = forward_socket.recv(buffer_size)
-                client_socket.sendall(response)
-    finally:
-        client_socket.close()
+def forward_data(rsu_socket, fms_socket):
+    while True:
+        data = rsu_socket.recv(4096)
+        print("Received Data from Fleet vehicle: " + str(data))
+        if not data:
+            break
+        fms_socket.sendall(data)
+        print("Forwarding Data to Fleet Management System")
+
+        response = fms_socket.recv(4096)
+        print("Received Response from Fleet Management System: " + str(response))
+        if not response:
+            break
+        rsu_socket.sendall(response)
+        print("Forwarding Response to Fleet vehicle")
 
 
-def handle_obu_connection(obu_socket, fms_address):
-    print("Connection established with OBU")
-    forward_message(obu_socket, fms_address)
+def start_rsu_server():
+    rsu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    rsu_address = ('localhost', 65336)
+    rsu_socket.bind(rsu_address)
+    rsu_socket.listen(1)
 
+    fms_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    fms_address = ('localhost', 65335)
+    fms_socket.connect(fms_address)
 
-def start_rsu_server(rsu_address, fms_address):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as rsu_socket:
-        rsu_socket.bind(rsu_address)
-        rsu_socket.listen(5)
-        print(f"RSU server listening on {rsu_address}")
+    while True:
+        obu_socket, client_address = rsu_socket.accept()
+        print("Connection from", client_address)
 
-        while True:
-            obu_socket, _ = rsu_socket.accept()
-            client_handler = threading.Thread(
-                target=handle_obu_connection,
-                args=(obu_socket, fms_address)
-            )
-            client_handler.start()
+        # Create a new thread to handle the communication with the OBU
+        thread = threading.Thread(target=forward_data, args=(obu_socket, fms_socket))
+        thread.start()
 
 
 def main():
-    rsu_address = ('localhost', 65438)
-    fms_address = ('localhost', 65439)
-    start_rsu_server(rsu_address, fms_address)
+    start_rsu_server()
 
 
 if __name__ == "__main__":
