@@ -126,10 +126,13 @@ def handle_obu_request(connection):
                 # Step 6: Send shared secret and session ID to OBU
                 connection.sendall(json.dumps({'shared_secret': shared_sec_enc, 'session_id': session_id_enc}).encode())
                 print("Authentication and Key Establishment Phase Successful")
+                connection.close()
+                exit()
             else:
                 print("Authentication failed")
                 connection.sendall(json.dumps({'status': 'failed'}).encode())
-
+                connection.close()
+                exit()
     except Exception as e:
         print("An error occurred:", e)
     finally:
@@ -139,7 +142,7 @@ def handle_obu_request(connection):
 # Create server to listen for connections
 def create_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('0.0.0.0', 65335)
+    server_address = ('0.0.0.0', 65334)
     sock.bind(server_address)
     sock.listen(1)
     print("FMS server listening on", server_address)

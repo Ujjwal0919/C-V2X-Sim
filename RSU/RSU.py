@@ -26,7 +26,7 @@ def start_rsu_server():
     rsu_socket.listen(1)
 
     fms_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    fms_address = ('localhost', 65335)
+    fms_address = ('localhost', 65334)
     fms_socket.connect(fms_address)
 
     while True:

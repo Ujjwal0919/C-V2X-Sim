@@ -58,7 +58,7 @@ def verify_signature(key, message, signature):
 # Receive and process message from OBU
 def receive_message_from_obu(shared_secret):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('localhost', 65439)
+    server_address = ('localhost', 65334)
     sock.bind(server_address)
     sock.listen(1)
 

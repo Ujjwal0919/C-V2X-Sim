@@ -96,7 +96,7 @@ def send_message_to_fms(message, session_id, shared_secret):
     print(f"Sending data packet: {encrypted_data_packet.hex()}")
     # Send data to FMS
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_address = ('localhost', 65439)
+    server_address = ('localhost', 65336)
     sock.connect(server_address)
 
     try:
