@@ -21,7 +21,7 @@ def forward_data(rsu_socket, fms_socket):
 
 def start_rsu_server():
     rsu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    rsu_address = ('localhost', 65336)
+    rsu_address = ('localhost', 65331)
     rsu_socket.bind(rsu_address)
     rsu_socket.listen(1)
 
